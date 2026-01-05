@@ -1,0 +1,115 @@
+#!/bin/sh
+
+# An example hook script to validate a patch (and/or patch series) before
+# sending it via email.
+#
+# The hook should exit with non-zero status after issuing an appropriate
+# message if it wants to prevent the email(s) from being sent.
+#
+# To enable this hook, copy this file to ".git/hooks/sendemail-validate"
+# and make it executable.
+#
+# By default, it will only check that the patch(es) can be applied on top of
+# the default upstream branch without conflicts in a secondary worktree. After
+# validation (successful or not) of the last patch of a series, the worktree
+# will be deleted.
+#
+# The following config variables can be set to change the default remote and
+# remote ref that are used to apply the patches against:
+#
+#   sendemail.validateRemote (default: origin)
+#   sendemail.validateRemoteRef (default: HEAD)
+
+validate_cover_letter () {
+	file="$1"
+
+	# Basic sanity checks for the cover letter.
+	test -s "$file" || {
+		echo "sendemail-validate: error: cover letter is empty" >&2
+		return 1
+	}
+	grep -q "^Subject:" "$file" || {
+		echo "sendemail-validate: error: cover letter missing Subject header" >&2
+		return 1
+	}
+	# Disallow trailing whitespace.
+	grep -n "[ 	]\$" "$file" >/dev/null && {
+		echo "sendemail-validate: error: cover letter has trailing whitespace" >&2
+		return 1
+	}
+}
+
+validate_patch () {
+	file="$1"
+
+	# Ensure that the patch applies without conflicts.
+	git am -3 "$file" || return
+
+	# Example patch checks:
+	# - Require a Signed-off-by trailer.
+	# - Disallow trailing whitespace introduced by the patch.
+	# - Disallow conflict markers.
+	git log -1 --pretty=%B | grep -qi "^Signed-off-by:" || {
+		echo "sendemail-validate: error: missing Signed-off-by in commit message" >&2
+		return 1
+	}
+	# `git diff --check` reports whitespace errors; treat any output as failure.
+	ws_errors=$(git diff --check HEAD^..HEAD) || return
+	test -z "$ws_errors" || {
+		echo "sendemail-validate: error: whitespace errors in patch:" >&2
+		echo "$ws_errors" >&2
+		return 1
+	}
+	git grep -n "^[<=>]\\{7\\}" -- . >/dev/null 2>&1 && {
+		echo "sendemail-validate: error: conflict marker found after applying patch" >&2
+		return 1
+	}
+}
+
+validate_series () {
+	# Example whole-series checks (keep fast/lightweight by default):
+	# - Ensure the worktree is clean after applying the series.
+	# - Ensure repository integrity is OK.
+	test -z "$(git status --porcelain)" || {
+		echo "sendemail-validate: error: worktree not clean after series" >&2
+		git status --porcelain >&2
+		return 1
+	}
+	git fsck --no-dangling >/dev/null || {
+		echo "sendemail-validate: error: git fsck reported problems" >&2
+		return 1
+	}
+}
+
+# main -------------------------------------------------------------------------
+
+if test "$GIT_SENDEMAIL_FILE_COUNTER" = 1
+then
+	remote=$(git config --default origin --get sendemail.validateRemote) &&
+	ref=$(git config --default HEAD --get sendemail.validateRemoteRef) &&
+	worktree=$(mktemp --tmpdir -d sendemail-validate.XXXXXXX) &&
+	git worktree add -fd --checkout "$worktree" "refs/remotes/$remote/$ref" &&
+	git config --replace-all sendemail.validateWorktree "$worktree"
+else
+	worktree=$(git config --get sendemail.validateWorktree)
+fi || {
+	echo "sendemail-validate: error: failed to prepare worktree" >&2
+	exit 1
+}
+
+unset GIT_DIR GIT_WORK_TREE
+cd "$worktree" &&
+
+if grep -q "^diff --git " "$1"
+then
+	validate_patch "$1"
+else
+	validate_cover_letter "$1"
+fi &&
+
+if test "$GIT_SENDEMAIL_FILE_COUNTER" = "$GIT_SENDEMAIL_FILE_TOTAL"
+then
+	git config --unset-all sendemail.validateWorktree &&
+	trap 'git worktree remove -ff "$worktree"' EXIT &&
+	validate_series
+fi
