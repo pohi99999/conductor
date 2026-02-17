@@ -27,6 +27,41 @@ gemini extensions install https://github.com/gemini-cli-extensions/conductor --a
 
 The `--auto-update` is optional: if specified, it will update to new versions as they are released.
 
+## Windows / OneDrive local setup (recommended: WSL)
+
+Conductor's command prompts use POSIX shell commands like `mkdir -p`, `cp`, and `ls`. On Windows, the smoothest setup is to run Gemini CLI inside **WSL** (Ubuntu) so those commands work as-is.
+
+### Option A (recommended): WSL (Ubuntu)
+
+1. Open **WSL Ubuntu**.
+2. Go to your Windows folder via `/mnt`:
+
+```bash
+cd /mnt/f/OneDrive/Desktop/Brunella_es_en
+```
+
+3. Install the extension (one-time):
+
+```bash
+gemini extensions install https://github.com/gemini-cli-extensions/conductor --auto-update
+```
+
+4. Start Gemini CLI, then run Conductor setup inside the Gemini prompt:
+
+```text
+/conductor:setup
+```
+
+This creates a `conductor/` folder **inside** your project directory and scaffolds the initial context files.
+
+### Option B: Git Bash
+
+Git Bash also provides `mkdir`, `cp`, and `ls`. The flow is the same as above, just `cd` into:
+
+```bash
+cd /f/OneDrive/Desktop/Brunella_es_en
+```
+
 ## Usage
 
 Conductor is designed to manage the entire lifecycle of your development tasks.
